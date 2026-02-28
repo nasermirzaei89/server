@@ -3,17 +3,11 @@ package server
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 )
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
 
 func TestDomainsToHTTPSAddress(t *testing.T) {
 	t.Parallel()
@@ -55,7 +49,7 @@ func TestDomainsToHTTPSAddress(t *testing.T) {
 func TestRunCancelable_ReturnsRunFuncError(t *testing.T) {
 	t.Parallel()
 
-	srv := &Server{Logger: newTestLogger()}
+	srv := &Server{}
 	expectedErr := errors.New("boom")
 
 	err := srv.runCancelable(context.Background(), &http.Server{}, func() error {
@@ -70,7 +64,7 @@ func TestRunCancelable_ReturnsRunFuncError(t *testing.T) {
 func TestRunCancelable_ShutsDownOnContextCancel(t *testing.T) {
 	t.Parallel()
 
-	srv := &Server{Logger: newTestLogger()}
+	srv := &Server{}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

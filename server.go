@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -29,6 +30,8 @@ const (
 	DefaultPort    = "8080"
 	DefaultTLSMode = TLSModeAutoCert
 )
+
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // Server represents the HTTP server.
 type Server struct {
@@ -60,6 +63,14 @@ func (err UnsupportedTLSModeError) Error() string {
 	return fmt.Sprintf("TLS mode %q is not supported", err.Mode)
 }
 
+func (server *Server) logger() *slog.Logger {
+	if server.Logger != nil {
+		return server.Logger
+	}
+
+	return discardLogger
+}
+
 // Run starts the HTTP server.
 func (server *Server) Run(ctx context.Context, httpHandler http.Handler) error {
 	if server.Port == "" {
@@ -73,7 +84,7 @@ func (server *Server) Run(ctx context.Context, httpHandler http.Handler) error {
 	addr := server.Host + ":" + server.Port
 
 	if server.TLS.Enabled {
-		server.Logger.DebugContext(ctx, "TLS is enabled")
+		server.logger().DebugContext(ctx, "TLS is enabled")
 
 		switch server.TLS.Mode {
 		case TLSModeAutoCert:
@@ -106,7 +117,7 @@ func (server *Server) runAcmeChallengeServer(ctx context.Context, autocertManage
 	}
 
 	err := server.runCancelable(ctx, httpServer, func() error {
-		server.Logger.InfoContext(ctx, "HTTP (ACME challenge) listening on "+addr)
+		server.logger().InfoContext(ctx, "HTTP (ACME challenge) listening on "+addr)
 
 		err := httpServer.ListenAndServe()
 		if err != nil {
@@ -116,7 +127,7 @@ func (server *Server) runAcmeChallengeServer(ctx context.Context, autocertManage
 		return nil
 	})
 	if err != nil {
-		server.Logger.ErrorContext(ctx, "ACME challenge server error", "error", err)
+		server.logger().ErrorContext(ctx, "ACME challenge server error", "error", err)
 	}
 }
 
@@ -147,7 +158,7 @@ func (server *Server) RunAutoCert(ctx context.Context, addr string, httpHandler 
 
 	err := server.runCancelable(ctx, httpServer, func() error {
 		address := domainsToHTTPSAddress(server.TLS.AutoCert.Domains)
-		server.Logger.InfoContext(ctx, "starting server", "address", address)
+		server.logger().InfoContext(ctx, "starting server", "address", address)
 
 		err := httpServer.ListenAndServeTLS("", "")
 		if err != nil {
@@ -191,7 +202,7 @@ func (server *Server) RunManualTLS(ctx context.Context, addr string, httpHandler
 	}
 
 	err := server.runCancelable(ctx, httpServer, func() error {
-		server.Logger.InfoContext(ctx, "starting server", "address", "https://"+addr)
+		server.logger().InfoContext(ctx, "starting server", "address", "https://"+addr)
 
 		err := httpServer.ListenAndServeTLS(server.TLS.CertFile, server.TLS.KeyFile)
 		if err != nil {
@@ -224,7 +235,7 @@ func (server *Server) RunUnsecured(ctx context.Context, addr string, httpHandler
 			addr = "0.0.0.0" + addr
 		}
 
-		server.Logger.InfoContext(ctx, "starting server", "address", "http://"+addr)
+		server.logger().InfoContext(ctx, "starting server", "address", "http://"+addr)
 
 		err := httpServer.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -260,15 +271,15 @@ func (server *Server) runCancelable(ctx context.Context, httpServer *http.Server
 		ctx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 		defer cancel()
 
-		server.Logger.InfoContext(ctx, "interrupt signal received")
-		server.Logger.InfoContext(ctx, "shutting down server...")
+		server.logger().InfoContext(ctx, "interrupt signal received")
+		server.logger().InfoContext(ctx, "shutting down server...")
 
 		err := httpServer.Shutdown(ctx)
 		if err != nil {
 			return fmt.Errorf("error shutting down server: %w", err)
 		}
 
-		server.Logger.InfoContext(ctx, "server shut down gracefully")
+		server.logger().InfoContext(ctx, "server shut down gracefully")
 
 		return nil
 	}

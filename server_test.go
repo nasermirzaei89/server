@@ -3,18 +3,12 @@ package server_test
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/nasermirzaei89/server"
 )
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
 
 func TestUnsupportedTLSModeError_Error(t *testing.T) {
 	t.Parallel()
@@ -32,7 +26,6 @@ func TestRun_ReturnsUnsupportedTLSModeError(t *testing.T) {
 	t.Parallel()
 
 	srv := &server.Server{
-		Logger: newTestLogger(),
 		TLS: server.ServerTLS{
 			Enabled: true,
 			Mode:    "invalid-mode",
@@ -58,8 +51,7 @@ func TestRun_SetsDefaultsBeforeStartFailure(t *testing.T) {
 	t.Parallel()
 
 	srv := &server.Server{
-		Host:   "bad host",
-		Logger: newTestLogger(),
+		Host: "bad host",
 	}
 
 	err := srv.Run(context.Background(), http.NewServeMux())
