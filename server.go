@@ -120,7 +120,7 @@ func (server *Server) runAcmeChallengeServer(ctx context.Context, autocertManage
 		server.logger().InfoContext(ctx, "HTTP (ACME challenge) listening on "+addr)
 
 		err := httpServer.ListenAndServe()
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("failed to start ACME challenge server: %w", err)
 		}
 
@@ -161,7 +161,7 @@ func (server *Server) RunAutoCert(ctx context.Context, addr string, httpHandler 
 		server.logger().InfoContext(ctx, "starting server", "address", address)
 
 		err := httpServer.ListenAndServeTLS("", "")
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("failed to start TLS server: %w", err)
 		}
 
@@ -205,7 +205,7 @@ func (server *Server) RunManualTLS(ctx context.Context, addr string, httpHandler
 		server.logger().InfoContext(ctx, "starting server", "address", "https://"+addr)
 
 		err := httpServer.ListenAndServeTLS(server.TLS.CertFile, server.TLS.KeyFile)
-		if err != nil {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("failed to start TLS server: %w", err)
 		}
 
@@ -268,18 +268,17 @@ func (server *Server) runCancelable(ctx context.Context, httpServer *http.Server
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
-		ctx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
 		defer cancel()
 
-		server.logger().InfoContext(ctx, "interrupt signal received")
-		server.logger().InfoContext(ctx, "shutting down server...")
+		server.logger().InfoContext(shutdownCtx, "shutting down server...", "reason", ctx.Err())
 
-		err := httpServer.Shutdown(ctx)
+		err := httpServer.Shutdown(shutdownCtx)
 		if err != nil {
 			return fmt.Errorf("error shutting down server: %w", err)
 		}
 
-		server.logger().InfoContext(ctx, "server shut down gracefully")
+		server.logger().InfoContext(shutdownCtx, "server shut down gracefully")
 
 		return nil
 	}
