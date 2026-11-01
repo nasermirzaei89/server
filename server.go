@@ -39,6 +39,11 @@ type Server struct {
 	Host   string
 	TLS    ServerTLS
 	Logger *slog.Logger
+
+	// OnShutdown is called when graceful shutdown starts. Request contexts are
+	// not canceled on shutdown, so long-lived handlers (server-sent events,
+	// websockets) must use this hook to stop, or Run waits up to ShutdownTimeout.
+	OnShutdown func()
 }
 
 type ServerTLS struct {
@@ -113,7 +118,7 @@ func (server *Server) runAcmeChallengeServer(ctx context.Context, autocertManage
 		ReadHeaderTimeout: HTTPServerTimeOut,
 		WriteTimeout:      HTTPServerTimeOut,
 		IdleTimeout:       HTTPServerTimeOut,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		BaseContext:       baseContext(ctx),
 	}
 
 	err := server.runCancelable(ctx, httpServer, func() error {
@@ -149,12 +154,14 @@ func (server *Server) RunAutoCert(ctx context.Context, addr string, httpHandler 
 		ReadHeaderTimeout: HTTPServerTimeOut,
 		WriteTimeout:      HTTPServerTimeOut,
 		IdleTimeout:       HTTPServerTimeOut,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		BaseContext:       baseContext(ctx),
 		TLSConfig: &tls.Config{
 			GetCertificate: autocertManager.GetCertificate,
 			MinVersion:     tls.VersionTLS12,
 		},
 	}
+
+	server.registerOnShutdown(httpServer)
 
 	err := server.runCancelable(ctx, httpServer, func() error {
 		address := domainsToHTTPSAddress(server.TLS.AutoCert.Domains)
@@ -195,11 +202,13 @@ func (server *Server) RunManualTLS(ctx context.Context, addr string, httpHandler
 		ReadHeaderTimeout: HTTPServerTimeOut,
 		WriteTimeout:      HTTPServerTimeOut,
 		IdleTimeout:       HTTPServerTimeOut,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		BaseContext:       baseContext(ctx),
 		TLSConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},
 	}
+
+	server.registerOnShutdown(httpServer)
 
 	err := server.runCancelable(ctx, httpServer, func() error {
 		server.logger().InfoContext(ctx, "starting server", "address", "https://"+addr)
@@ -227,8 +236,10 @@ func (server *Server) RunUnsecured(ctx context.Context, addr string, httpHandler
 		ReadHeaderTimeout: HTTPServerTimeOut,
 		WriteTimeout:      HTTPServerTimeOut,
 		IdleTimeout:       HTTPServerTimeOut,
-		BaseContext:       func(_ net.Listener) context.Context { return ctx },
+		BaseContext:       baseContext(ctx),
 	}
+
+	server.registerOnShutdown(httpServer)
 
 	err := server.runCancelable(ctx, httpServer, func() error {
 		if strings.HasPrefix(addr, ":") {
@@ -249,6 +260,18 @@ func (server *Server) RunUnsecured(ctx context.Context, addr string, httpHandler
 	}
 
 	return nil
+}
+
+// baseContext keeps ctx values but drops its cancellation, so in-flight requests
+// can finish within ShutdownTimeout after ctx is canceled.
+func baseContext(ctx context.Context) func(net.Listener) context.Context {
+	return func(_ net.Listener) context.Context { return context.WithoutCancel(ctx) }
+}
+
+func (server *Server) registerOnShutdown(httpServer *http.Server) {
+	if server.OnShutdown != nil {
+		httpServer.RegisterOnShutdown(server.OnShutdown)
+	}
 }
 
 func (server *Server) runCancelable(ctx context.Context, httpServer *http.Server, runFunc func() error) error {

@@ -147,3 +147,5 @@ func newServer() *server.Server {
   - server startup fails, or
   - context is canceled and graceful shutdown completes.
 - In `autocert` mode, an additional HTTP server is started on port `80` for ACME challenge handling.
+- Request contexts are not canceled when shutdown starts, so in-flight requests can finish within the `5s` grace window.
+  Long-lived handlers (server-sent events, websockets) must stop through `Server.OnShutdown`, or shutdown waits the full timeout.
